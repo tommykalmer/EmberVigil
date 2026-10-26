@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Ember Vigil</title>
+<meta name="description" content="Survive the winter night until dawn. A Nordic survivors-like browser game.">
+<meta name="theme-color" content="#0a1120">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ember Vigil">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Grenze+Gotisch:wght@600;800&family=Barlow+Condensed:wght@500;600;700&family=Noto+Sans+Runic&display=swap">
@@ -168,6 +177,11 @@ h2.cold{color:var(--frost);text-shadow:0 0 22px rgba(120,190,255,.35)}
 #adcover{position:fixed;inset:0;z-index:50;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--frost-dim);font-size:18px;letter-spacing:.1em}
 #adcover div{width:200px;height:4px;background:#222;border-radius:2px;overflow:hidden}
 #adcover i{display:block;height:100%;width:0;background:var(--aurora)}
+textarea{width:100%;box-sizing:border-box;min-height:74px;resize:none;border-radius:10px;border:1px solid var(--line);background:rgba(5,9,18,.8);color:var(--frost);
+  font:14px/1.35 ui-monospace,Menlo,Consolas,monospace;padding:10px;-webkit-user-select:text;user-select:text;word-break:break-all}
+textarea:focus{outline:2px solid var(--ember);outline-offset:1px}
+.btn.small{min-height:44px;font-size:17px}
+.linkbtn{font-size:16px;letter-spacing:.06em;color:var(--frost-dim);text-decoration:underline;text-underline-offset:3px;padding:6px;align-self:center}
 .foot{text-align:center;color:var(--frost-dim);font-size:14px;letter-spacing:.06em;opacity:.8}
 @media (prefers-reduced-motion:reduce){.card{animation:none}}
 </style>
@@ -209,6 +223,7 @@ h2.cold{color:var(--frost);text-shadow:0 0 22px rgba(120,190,255,.35)}
       <button class="btn ghost" id="bmute2">Sound on</button>
     </div>
     <p class="tip" id="mtip" hidden></p>
+    <button class="linkbtn" id="bbackup">Save backup / restore progress</button>
     <p class="foot">Move with your finger or WASD. Your weapons fire by themselves.<br>Collect the blue crystals to level up and get stronger.</p>
   </div>
 </section>
@@ -220,6 +235,19 @@ h2.cold{color:var(--frost);text-shadow:0 0 22px rgba(120,190,255,.35)}
     <div class="meta-line"><span>Your wallet</span><span class="emb" id="semb">0</span></div>
     <div class="list" id="shoplist"></div>
     <button class="btn ghost" id="bshopback">Back</button>
+  </div>
+</section>
+
+<section class="screen dim" id="backup" hidden>
+  <div class="col">
+    <h2>Your progress</h2>
+    <p class="sub">Progress is saved on this device. Copy this code to Notes or a message to yourself. Paste it here on any device to get everything back.</p>
+    <textarea id="bkcode" readonly aria-label="Your backup code"></textarea>
+    <button class="btn primary small" id="bkcopy">Copy backup code</button>
+    <textarea id="bkin" placeholder="Paste a backup code here to restore" aria-label="Paste backup code"></textarea>
+    <button class="btn ghost small" id="bkrestore">Restore from code</button>
+    <p class="tip" id="bkmsg"></p>
+    <button class="btn ghost small" id="bkback">Back</button>
   </div>
 </section>
 
@@ -1331,7 +1359,7 @@ function toast(msg, sub, secs) {
 }
 
 /* ---------------- Screens & menus ---------------- */
-const SCREENS = ['menu', 'shop', 'levelup', 'pause', 'dead', 'result'];
+const SCREENS = ['menu', 'shop', 'backup', 'levelup', 'pause', 'dead', 'result'];
 function showScreen(id) { for (const s of SCREENS) $(s).hidden = s !== id; if (id) { $('toast').classList.remove('on'); clearTimeout(toastTimer); } }
 function renderMenu() {
   $('memb').textContent = save.embers;
@@ -1354,7 +1382,9 @@ function renderMenu() {
   }
   const canBuy = SHOP.some(it => (save.meta[it.id] || 0) < it.max && save.embers >= it.cost[save.meta[it.id] || 0]);
   $('bshop').textContent = canBuy ? 'Upgrades •' : 'Upgrades';
-  $('mtip').hidden = !canBuy; $('mtip').textContent = `You have ${save.embers} embers. Tap Upgrades to get permanently stronger.`; $('bshop').style.color = canBuy ? 'var(--ember-hot)' : '';
+  const needBackup = !canBuy && save.runs >= 3 && save.runs - (save.lastBackup || 0) >= 8;
+  $('mtip').hidden = !canBuy && !needBackup;
+  $('mtip').textContent = canBuy ? `You have ${save.embers} embers. Tap Upgrades to get permanently stronger.` : 'Tip: save a backup code so you never lose your progress.'; $('bshop').style.color = canBuy ? 'var(--ember-hot)' : '';
   renderMute();
 }
 function renderNight() {
@@ -1380,6 +1410,29 @@ function goMenu() { G = null; $('hud').hidden = true; renderMenu(); showScreen('
 function pauseGame() { if (!G || G.state !== 'play') return; G.state = 'paused'; CG.stop(); $('ploadout').innerHTML = loadoutHtml(); showScreen('pause'); keys.clear(); joy.active = false; }
 function resumeGame() { if (!G || G.state !== 'paused') return; showScreen(null); G.state = 'play'; CG.start(); }
 
+function backupCode() { const json = JSON.stringify(save); let h = 0; for (let i = 0; i < json.length; i++) h = (Math.imul(h, 31) + json.charCodeAt(i)) | 0; return 'EV1-' + btoa(unescape(encodeURIComponent(json))) + '-' + (h >>> 0).toString(36); }
+function readCode(code) {
+  const m = /^EV1-([A-Za-z0-9+/=]+)-([a-z0-9]+)$/.exec(code.replace(/\s+/g, '')); if (!m) return null;
+  try { const json = decodeURIComponent(escape(atob(m[1]))); let h = 0; for (let i = 0; i < json.length; i++) h = (Math.imul(h, 31) + json.charCodeAt(i)) | 0; if ((h >>> 0).toString(36) !== m[2]) return null; const d = JSON.parse(json); return typeof d.embers === 'number' ? d : null; } catch (e) { return null; }
+}
+let restorePending = null;
+function openBackup() { $('bkcode').value = backupCode(); $('bkin').value = ''; $('bkmsg').textContent = ''; $('bkrestore').textContent = 'Restore from code'; restorePending = null; showScreen('backup'); }
+$('bbackup').addEventListener('click', () => { Sfx.init(); Sfx.play('click'); openBackup(); });
+$('bkback').addEventListener('click', () => { Sfx.play('click'); renderMenu(); showScreen('menu'); });
+$('bkcopy').addEventListener('click', () => {
+  const ta = $('bkcode'); save.lastBackup = save.runs; writeSave(); ta.value = backupCode();
+  const done = () => { $('bkmsg').textContent = 'Copied! Paste it somewhere safe, like Notes.'; Sfx.play('pick'); };
+  const fallback = () => { ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length); let ok = false; try { ok = document.execCommand('copy'); } catch (e) {} $('bkmsg').textContent = ok ? 'Copied! Paste it somewhere safe, like Notes.' : 'The code is selected. Copy it with your phone\'s Copy button.'; };
+  try { navigator.clipboard.writeText(ta.value).then(done, fallback); } catch (e) { fallback(); }
+});
+$('bkrestore').addEventListener('click', () => {
+  const d = readCode($('bkin').value.trim());
+  if (!d) { $('bkmsg').textContent = 'That code does not look right. Copy the whole code, starting with EV1-.'; restorePending = null; $('bkrestore').textContent = 'Restore from code'; return; }
+  if (!restorePending) { restorePending = d; $('bkrestore').textContent = 'Tap again to confirm'; $('bkmsg').textContent = `This replaces your current progress (${save.embers} embers) with the code's progress (${d.embers} embers, Night ${d.nightMax || 1} unlocked).`; return; }
+  const b = DEFAULT_SAVE(); save = Object.assign(b, restorePending); save.meta = Object.assign(b.meta, restorePending.meta || {}); save.chars = Object.assign({ keeper: true }, restorePending.chars || {}); save.best = Object.assign(DEFAULT_SAVE().best, restorePending.best || {});
+  writeSave(); restorePending = null; $('bkrestore').textContent = 'Restore from code'; $('bkcode').value = backupCode(); $('bkin').value = '';
+  $('bkmsg').textContent = 'Progress restored!'; Sfx.play('chest'); Sfx.applyVol();
+});
 $('nprev').addEventListener('click', () => { save.night = Math.max(1, (save.night || 1) - 1); writeSave(); Sfx.init(); Sfx.play('click'); renderNight(); });
 $('nnext').addEventListener('click', () => { save.night = Math.min(save.nightMax, (save.night || 1) + 1); writeSave(); Sfx.init(); Sfx.play('click'); renderNight(); });
 $('bplay').addEventListener('click', () => { Sfx.init(); Sfx.resume(); Sfx.play('click'); newRun(); });
@@ -1446,6 +1499,7 @@ function frame(now) {
 }
 (async function boot() {
   loadSave(); renderMenu(); showScreen('menu'); requestAnimationFrame(frame);
+  try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
   await CG.init();
   if (CG.sdk) { loadSave(); renderMenu(); }
   CG.loaded();
