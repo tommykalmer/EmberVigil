@@ -7,7 +7,7 @@ A Nordic winter-night survivors-like for the browser. Keep your lantern lit and 
 ## How to play
 - Move with your finger (drag anywhere) or WASD / arrow keys. Your weapons fire by themselves.
 - Collect the blue crystals to level up and pick an upgrade.
-- Survive 10 minutes until dawn. Bosses arrive at 3, 6 and 9 minutes.
+- Survive 7 minutes until dawn. Bosses arrive at 2, 4 and 6 minutes.
 - Every game earns embers, even when you fall. Spend them on permanent upgrades and new heroes.
 - Win a night to unlock the next one (10 nights in total, each harder and more rewarding).
 
