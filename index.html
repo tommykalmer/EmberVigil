@@ -198,7 +198,7 @@ textarea:focus{outline:2px solid var(--ember);outline-offset:1px}
   <div class="xpbar"><i id="xpfill"></i></div>
   <div class="hudrow">
     <div class="hl"><div class="lv" id="hlv">Lv 1</div><div class="slots" id="hslots"></div></div>
-    <div class="tcol"><div class="timer" id="htime">10:00</div><div class="goal" id="hgoal">until dawn</div><div class="nbar"><i id="nfill"></i><b id="nb0" style="left:30%"></b><b id="nb1" style="left:60%"></b><b id="nb2" style="left:90%"></b><span class="sun"></span></div></div>
+    <div class="tcol"><div class="timer" id="htime">7:00</div><div class="goal" id="hgoal">until dawn</div><div class="nbar"><i id="nfill"></i><b id="nb0"></b><b id="nb1"></b><b id="nb2"></b><span class="sun"></span></div></div>
     <div class="hr">
       <div class="ctl">
         <button class="icon" id="bmute" aria-label="Toggle sound"></button>
@@ -383,14 +383,14 @@ function mockAd() {
 
 /* ---------------- Save data ---------------- */
 const SAVE_KEY = 'embervigil_save_v1';
-const DEFAULT_SAVE = () => ({ embers: 0, meta: { might: 0, vit: 0, swift: 0, magnet: 0, greed: 0, revive: 0 }, chars: { keeper: true }, char: 'keeper', best: { time: 0, kills: 0, level: 0 }, muted: false, runs: 0, wins: 0, tutDone: false, night: 1, nightMax: 1, shake: true, vib: true });
+const DEFAULT_SAVE = () => ({ embers: 0, meta: { might: 0, vit: 0, swift: 0, magnet: 0, greed: 0, revive: 0, kindle: 0 }, chars: { keeper: true }, char: 'keeper', best: { time: 0, kills: 0, level: 0 }, muted: false, runs: 0, wins: 0, tutDone: false, night: 1, nightMax: 1, shake: true, vib: true });
 let save = DEFAULT_SAVE();
 function loadSave() {
   let raw = null;
   try { if (CG.sdk && CG.sdk.data) raw = CG.sdk.data.getItem(SAVE_KEY); } catch (e) {}
   if (!raw) { try { raw = localStorage.getItem(SAVE_KEY); } catch (e) {} }
   if (raw) {
-    try { const d = JSON.parse(raw); const b = DEFAULT_SAVE(); save = Object.assign(b, d); save.meta = Object.assign(b.meta, d.meta || {}); save.chars = Object.assign({ keeper: true }, d.chars || {}); save.best = Object.assign(DEFAULT_SAVE().best, d.best || {}); } catch (e) {}
+    try { const d = JSON.parse(raw); const b = DEFAULT_SAVE(); save = Object.assign(b, d); save.meta = Object.assign(b.meta, d.meta || {}); save.chars = Object.assign({ keeper: true }, d.chars || {}); save.best = Object.assign(DEFAULT_SAVE().best, d.best || {}); save.best.time = Math.min(save.best.time, NIGHT_LEN); } catch (e) {}
   }
 }
 function writeSave() {
@@ -736,14 +736,21 @@ const SHOP = [
   { id: 'swift', name: 'Light Step', rune: 'ᚱ', desc: '+4% move speed', max: 5, cost: [30, 60, 110, 170, 250] },
   { id: 'magnet', name: 'Lodestone Charm', rune: 'ᛜ', desc: '+10% pickup range', max: 5, cost: [25, 50, 90, 140, 200] },
   { id: 'greed', name: 'Ember Hoard', rune: 'ᚠ', desc: '+10% embers per vigil', max: 5, cost: [50, 100, 170, 260, 380] },
+  { id: 'kindle', name: 'Kindling', rune: 'ᚺ', desc: 'Start every vigil with +1 free level-up', max: 3, cost: [60, 160, 320] },
   { id: 'revive', name: 'Second Wind', rune: 'ᛇ', desc: 'Rise once per vigil for free', max: 1, cost: [400] }
 ];
 const BOSSES = [
-  { t: 180, name: 'Grimmr of the Fell', type: 'troll', scale: 2.3, hp: 1800, spd: 52, shards: 10, every: 3.2 },
-  { t: 360, name: 'The Pale Mother', type: 'wraith', scale: 3, hp: 6500, spd: 70, shards: 14, every: 2.6 },
-  { t: 540, name: 'Hrímþurs, Frost Giant', type: 'giant', scale: 1, hp: 17000, spd: 50, shards: 18, every: 2.2 }
+  { t: 240, name: 'Grimmr of the Fell', type: 'troll', scale: 2.3, hp: 1800, spd: 52, shards: 10, every: 3.2 },
+  { t: 384, name: 'The Pale Mother', type: 'wraith', scale: 3, hp: 6500, spd: 70, shards: 14, every: 2.6 },
+  { t: 528, name: 'Hrímþurs, Frost Giant', type: 'giant', scale: 1, hp: 17000, spd: 50, shards: 18, every: 2.2 }
 ];
-const RUN_LENGTH = 600;
+const RUN_LENGTH = 600; // length of the night on the difficulty clock (G.t)
+const NIGHT_LEN = 420;  // real seconds a night lasts (G.rt)
+// The difficulty clock runs 2x for the first 2 minutes (no slow warm-up), then 1.2x.
+const PACE_SPLIT = 120;
+const diffAt = rt => rt <= PACE_SPLIT ? rt * 2 : PACE_SPLIT * 2 + (rt - PACE_SPLIT) * 1.2;
+const realAt = d => d <= PACE_SPLIT * 2 ? d / 2 : PACE_SPLIT + (d - PACE_SPLIT * 2) / 1.2;
+const XP_FAST = 1.9, XP_MUL = 1.5; // nights are 7 min instead of 10, so heroes grow faster
 const xpNeed = l => Math.floor(2 + l * 2 + Math.pow(l, 1.75) * .3);
 
 function wstats(id, l) {
@@ -768,7 +775,7 @@ const menuCam = { x: 0, y: 0 };
 function newRun() {
   const ch = CHARS[save.char] || CHARS.keeper;
   G = {
-    t: 0, kills: 0, level: 1, xp: 0, xpNext: xpNeed(1), embersRun: 0, char: save.char,
+    t: 0, rt: 0, pt: 0, kills: 0, level: 1, xp: 0, xpNext: xpNeed(1), embersRun: 0, char: save.char,
     night: Math.max(1, Math.min(save.night || 1, save.nightMax || 1)), tut: save.tutDone ? 0 : 1, tutMoved: 0, tutT: 0,
     p: { x: 0, y: 0, r: 12, hp: 100, maxHp: 100, speed: 150, might: 1, cdMult: 1, area: 1, pickup: 48, armor: 0, regen: 0, fx: 1, fy: 0, iframes: 0, moving: false, revives: save.meta.revive ? 1 : 0, walk: 0 },
     weapons: [], passives: {}, enemies: [], projs: [], eprojs: [], gems: [], drops: [], zones: [], fx: [], parts: [], texts: [],
@@ -779,6 +786,7 @@ function newRun() {
   const nk = G.night - 1; G.nHp = 1 + .45 * nk; G.nDmg = 1 + .15 * nk; G.nSpawn = 1 + .06 * nk; G.nBoss = 1 + .5 * nk; G.nEmb = 1 + .35 * nk; G.nShift = nk * 12;
   addWeapon(ch.weapon);
   recalc(); G.p.hp = G.p.maxHp;
+  const kin = save.meta.kindle || 0; if (kin) { G.level = 1 + kin; G.xpNext = xpNeed(G.level); G.pendingLevels = kin; G.headStart = true; }
   showScreen(null); $('hud').hidden = false; $('bossbar').hidden = true;
   CG.start();
 }
@@ -833,8 +841,8 @@ function nearestEnemies(x, y, n, maxD, exclude) {
 function viewRadius() { return Math.hypot(W / SCALE, H / SCALE) / 2; }
 function spawnPos(angle) { const a = angle === undefined ? rand(TAU) : angle, R = viewRadius() + 30; return [G.p.x + Math.cos(a) * R, G.p.y + Math.sin(a) * R]; }
 function spawnEnemy(type, x, y, o) {
-  o = o || {}; const T = ETYPES[type], s = o.scale || 1, hpm = (1 + G.t / 110) * G.nHp;
-  const e = { id: EID++, type, x, y, kx: 0, ky: 0, r: T.r * s, hp: o.hp || T.hp * hpm, spd: o.spd || T.spd * rand(.9, 1.1), dmg: T.dmg * (1 + G.t / 420) * (o.dmgMul || 1) * G.nDmg, xp: T.xp * (o.xpMul || 1), mass: T.mass * s * s, atk: 0, flash: 0, ringCd: 0, scale: s, elite: !!o.elite, boss: o.boss || null, dead: false, qid: 0, wob: rand(TAU), shardT: o.boss ? 2 : 0 };
+  o = o || {}; const T = ETYPES[type], s = o.scale || 1, hpm = (1 + G.pt / 110) * G.nHp;
+  const e = { id: EID++, type, x, y, kx: 0, ky: 0, r: T.r * s, hp: o.hp || T.hp * hpm, spd: o.spd || T.spd * rand(.9, 1.1), dmg: T.dmg * (1 + G.pt / 420) * (o.dmgMul || 1) * G.nDmg, xp: T.xp * (o.xpMul || 1), mass: T.mass * s * s, atk: 0, flash: 0, ringCd: 0, scale: s, elite: !!o.elite, boss: o.boss || null, dead: false, qid: 0, wob: rand(TAU), shardT: o.boss ? 2 : 0 };
   e.maxHp = e.hp; G.enemies.push(e); return e;
 }
 function pickType(t) {
@@ -867,7 +875,7 @@ function director(dt) {
   // elites
   if (t >= G.nextElite) {
     G.nextElite += 60; const [x, y] = spawnPos(); const type = pickType(t + G.nShift);
-    spawnEnemy(type, x, y, { scale: 1.6, elite: true, hp: ETYPES[type].hp * (1 + t / 110) * 12 * G.nHp, xpMul: 5, spd: ETYPES[type].spd * .85 });
+    spawnEnemy(type, x, y, { scale: 1.6, elite: true, hp: ETYPES[type].hp * (1 + G.pt / 110) * 12 * G.nHp, xpMul: 5, spd: ETYPES[type].spd * .85 });
   }
   // bosses
   const B = BOSSES[G.bossIdx];
@@ -877,9 +885,9 @@ function director(dt) {
     $('bossname').textContent = B.name; $('bossbar').hidden = false;
     toast('Boss: ' + B.name, 'Defeat it for a treasure chest', 3); Sfx.play('boss'); shake(.55); punch(-.07); flash(.25, '120,190,255'); buzz([40, 30, 70]);
   }
-  if (t >= 300 && once('half')) toast('5 minutes until dawn', 'Halfway through the night');
-  if (t >= RUN_LENGTH - 60 && once('min1')) toast('1 minute until dawn', 'The sky is getting lighter');
-  if (t >= RUN_LENGTH - 30 && once('dawnnear')) toast('Dawn is near', '30 seconds left');
+  if (G.rt >= NIGHT_LEN / 2 && once('half')) toast('Halfway to dawn', 'The night grows colder');
+  if (G.rt >= NIGHT_LEN - 60 && once('min1')) toast('1 minute until dawn', 'The sky is getting lighter');
+  if (G.rt >= NIGHT_LEN - 30 && once('dawnnear')) toast('Dawn is near', '30 seconds left');
   if (t >= RUN_LENGTH && once('dawn')) victory();
 }
 
@@ -1056,7 +1064,7 @@ function updateEnemies(dt) {
     e.x += (dx / d * e.spd + e.kx) * dt; e.y += (dy / d * e.spd + e.ky) * dt;
     e.kx *= damp; e.ky *= damp;
     e.atk -= dt; e.flash -= dt; e.ringCd -= dt; if (e.sq) e.sq = Math.max(0, e.sq - dt * 7);
-    if (d < e.r + P.r && e.atk <= 0) { e.atk = .9; hurtPlayer(e.dmg * (G.t < 120 ? .7 : 1), e.x, e.y); }
+    if (d < e.r + P.r && e.atk <= 0) { e.atk = .9; hurtPlayer(e.dmg * (G.rt < 90 ? .7 : 1), e.x, e.y); }
     if (e.boss) {
       e.shardT -= dt;
       if (e.shardT <= 0) {
@@ -1107,7 +1115,7 @@ function updateGems(dt) {
   }
 }
 function gainXp(v) {
-  G.xp += v; G.xpPulse = .12;
+  G.xp += v * (G.rt <= PACE_SPLIT ? XP_FAST : XP_MUL); G.xpPulse = .12;
   while (G.xp >= G.xpNext) { G.xp -= G.xpNext; G.level++; G.xpNext = xpNeed(G.level); G.pendingLevels++; }
 }
 function updateDrops(dt) {
@@ -1160,16 +1168,16 @@ function readInput() {
   return [mx, my];
 }
 function update(dt) {
-  const P = G.p; G.t += dt;
+  const P = G.p; G.rt += dt; const pace = G.rt <= PACE_SPLIT ? 2 : 1.2; G.t = diffAt(G.rt); G.pt = G.rt * RUN_LENGTH / NIGHT_LEN;
   const [mx, my] = readInput(), ml = Math.hypot(mx, my);
   P.vx = mx * P.speed; P.vy = my * P.speed; P.x += P.vx * dt; P.y += P.vy * dt;
   P.moving = ml > .05; if (P.moving) { P.fx = mx / ml; P.fy = my / ml; P.walk += dt * 10 * ml; }
   P.hp = Math.min(P.maxHp, P.hp + P.regen * dt); P.iframes -= dt; G.grace -= dt;
   const hpr = P.hp / P.maxHp;
   if (hpr < .3 && hpr > 0) { G.beatT -= dt; if (G.beatT <= 0) { G.beatT = .62 + hpr * 1.2; G.beatPulse = 1; Sfx.play('heart'); if (hpr < .15) buzz(18); } } else G.beatT = 0;
-  if (G.tut === 1) { G.tutMoved += ml * P.speed * dt; if (G.tutMoved > 90 || G.t > 8) G.tut = 2; }
+  if (G.tut === 1) { G.tutMoved += ml * P.speed * dt; if (G.tutMoved > 90 || G.rt > 6) G.tut = 2; }
   if (G.tut === 4) { G.tutT -= dt; if (G.tutT <= 0) { G.tut = 0; save.tutDone = true; writeSave(); } }
-  director(dt);
+  director(dt * pace);
   buildGrid();
   updateWeapons(dt); updateProjs(dt); updateEnemies(dt); updateEProjs(dt); updateZones(dt);
   updateGems(dt); updateDrops(dt); updateFx(dt);
@@ -1203,7 +1211,7 @@ function buildChoices(n) {
 function openLevelUp() {
   G.state = 'levelup'; const chest = G.pendingChests > 0;
   if (G.tut === 2) G.tut = 3;
-  $('lutitle').textContent = chest ? 'Treasure!' : 'Level ' + (G.level - G.pendingLevels + 1);
+  $('lutitle').textContent = chest ? 'Treasure!' : G.headStart && G.rt < 3 ? 'Head start · Level ' + (G.level - G.pendingLevels + 1) : 'Level ' + (G.level - G.pendingLevels + 1);
   $('lusub').textContent = G.tut === 3 ? 'You leveled up! Pick one. New weapons fire by themselves.' : chest ? 'Pick one free upgrade' : 'Pick an upgrade for this game';
   choices = buildChoices(chest ? 4 : 3);
   renderCards(); $('breroll').disabled = G.rerolls >= 3;
@@ -1255,20 +1263,20 @@ function endRun(won) {
   const earned = Math.round((G.kills * .04 + G.t / 60 * 6 + G.embersRun + (won ? 60 : 0)) * greed * G.nEmb);
   G.earned = earned; G.walletBefore = save.embers; save.embers += earned;
   const row = (a, b, cls) => `<div class="${cls || ''}"><span>${a}</span><span>${b}</span></div>`;
-  let bh = '<h3>Embers earned this game</h3>' + row('Survived ' + fmtTime(G.t), '+' + Math.round(G.t / 60 * 6)) + row(G.kills.toLocaleString('en-US') + ' monsters defeated', '+' + Math.round(G.kills * .04)) + row('Embers picked up', '+' + G.embersRun);
+  let bh = '<h3>Embers earned this game</h3>' + row('Survived ' + fmtTime(G.rt), '+' + Math.round(G.t / 60 * 6)) + row(G.kills.toLocaleString('en-US') + ' monsters defeated', '+' + Math.round(G.kills * .04)) + row('Embers picked up', '+' + G.embersRun);
   if (won) bh += row('Survived until dawn', '+60');
   if (G.nEmb > 1) bh += row('Night ' + G.night + ' bonus', '×' + (+G.nEmb.toFixed(2)));
   if (greed > 1) bh += row('Ember Hoard upgrade', '×' + (+greed.toFixed(2)));
   bh += `<div class="tot"><span>Total</span><span id="remb">+${earned}</span></div>` + `<span class="wal" id="rwal">Your wallet: ${G.walletBefore} → ${save.embers} embers. Spend them on Upgrades, or on new heroes in the Menu.</span>`;
   $('rbreak').innerHTML = bh; save.runs++; if (won) save.wins++;
   let unlocked = false; if (won && G.night >= save.nightMax && save.nightMax < 10) { save.nightMax = G.night + 1; save.night = save.nightMax; unlocked = true; }
-  const newBest = G.t > save.best.time;
-  save.best.time = Math.max(save.best.time, G.t); save.best.kills = Math.max(save.best.kills, G.kills); save.best.level = Math.max(save.best.level, G.level);
+  const newBest = G.rt > save.best.time;
+  save.best.time = Math.max(save.best.time, G.rt); save.best.kills = Math.max(save.best.kills, G.kills); save.best.level = Math.max(save.best.level, G.level);
   writeSave();
   $('rtitle').textContent = won ? 'You survived Night ' + G.night + '!' : 'You fell';
   $('rtitle').className = won ? '' : 'cold';
   $('rsub').textContent = unlocked ? `Night ${save.nightMax} is now unlocked. The monsters are tougher there, but you earn more embers.` : won ? 'Dawn broke and the monsters fled. Try a harder night for more embers.' : (newBest ? 'New personal best! ' : '') + 'Spend embers on upgrades or new heroes to last longer.';
-  $('rtime').textContent = fmtTime(G.t); $('rlv').textContent = G.level; $('rkills').textContent = G.kills.toLocaleString('en-US'); $('remb').textContent = '+' + earned;
+  $('rtime').textContent = fmtTime(G.rt); $('rlv').textContent = G.level; $('rkills').textContent = G.kills.toLocaleString('en-US'); $('remb').textContent = '+' + earned;
   $('bdouble').disabled = earned < 1;
   $('rloadout').innerHTML = loadoutHtml();
   showScreen('result');
@@ -1493,6 +1501,8 @@ let hudAcc = 0;
 const SVG_ON = '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg>';
 const SVG_OFF = '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9l5 6M22 9l-5 6"/></svg>';
 function renderMute() { $('bmute').innerHTML = save.muted ? SVG_OFF : SVG_ON; $('bmute2').textContent = save.muted ? 'Sound off' : 'Sound on'; }
+function placeBossMarks() { BOSSES.forEach((b, i) => { const el = $('nb' + i); if (el) el.style.left = (realAt(b.t) / NIGHT_LEN * 100).toFixed(1) + '%'; }); }
+placeBossMarks();
 function renderSlots() {
   if (!G) return;
   $('hslots').innerHTML = G.weapons.map(w => `<span>${WEAPONS[w.id].rune}</span>`).join('') + Object.keys(G.passives).map(id => `<span class="p">${PASSIVES[id].rune}</span>`).join('');
@@ -1503,13 +1513,14 @@ function hudTick(dt) {
   $('xpfill').style.width = (G.xp / G.xpNext * 100).toFixed(1) + '%';
   const lvT = 'Lv ' + G.level, lvE = $('hlv'); if (lvE.textContent !== lvT) { lvE.textContent = lvT; lvE.classList.remove('pop'); void lvE.offsetWidth; lvE.classList.add('pop'); }
   $('xpfill').parentNode.classList.toggle('pulse', G.xpPulse > 0);
-  $('htime').textContent = fmtTime(Math.max(0, RUN_LENGTH - G.t) + .99);
+  $('htime').textContent = fmtTime(Math.max(0, NIGHT_LEN - G.rt) + .99);
   $('hkills').textContent = G.kills.toLocaleString('en-US');
   $('hemb').textContent = G.embersRun + ' embers';
-  const left = Math.max(0, RUN_LENGTH - G.t), nb = BOSSES[G.bossIdx], goal = $('hgoal');
-  $('nfill').style.width = Math.min(100, G.t / RUN_LENGTH * 100).toFixed(1) + '%';
+  const nb = BOSSES[G.bossIdx], goal = $('hgoal');
+  $('nfill').style.width = Math.min(100, G.rt / NIGHT_LEN * 100).toFixed(1) + '%';
   for (let i = 0; i < 3; i++) $('nb' + i).className = (G.bossIdx > i && !(G.boss && G.boss.boss === BOSSES[i])) ? 'done' : '';
-  if (nb && nb.t - G.t <= 45 && nb.t > G.t) { goal.textContent = 'Boss in ' + fmtTime(nb.t - G.t + .99); goal.className = 'goal boss'; }
+  const nbr = nb ? realAt(nb.t) : 0;
+  if (nb && nbr - G.rt <= 30 && nbr > G.rt) { goal.textContent = 'Boss in ' + fmtTime(nbr - G.rt + .99); goal.className = 'goal boss'; }
   else { goal.textContent = 'until dawn · Night ' + G.night; goal.className = 'goal'; }
   const hint = $('hint'), H_ = { 1: ['Drag your finger to move', 'Or use WASD / arrow keys'], 2: ['Walk over the blue crystals', 'Fill the blue bar at the top to level up'], 4: ['Survive until the timer hits 0:00', 'Monsters get stronger. Keep collecting crystals!'] }[G.tut];
   if (H_ && G.state === 'play') { const key = G.tut + ''; if (hint.dataset.k !== key) { hint.dataset.k = key; hint.innerHTML = ''; hint.appendChild(document.createTextNode(H_[0])); const sm = document.createElement('small'); sm.textContent = H_[1]; hint.appendChild(sm); } hint.hidden = false; }
@@ -1530,7 +1541,7 @@ const SCREENS = ['menu', 'shop', 'backup', 'levelup', 'pause', 'dead', 'result']
 function showScreen(id) { for (const s of SCREENS) $(s).hidden = s !== id; if (id) { $('toast').classList.remove('on'); clearTimeout(toastTimer); } }
 function renderMenu() {
   $('memb').textContent = save.embers;
-  $('mbest').textContent = save.best.time > 0 ? `Best: survived ${fmtTime(save.best.time)} · ${save.best.kills.toLocaleString('en-US')} defeated` : 'Goal: survive 10 minutes';
+  $('mbest').textContent = save.best.time > 0 ? `Best: survived ${fmtTime(save.best.time)} · ${save.best.kills.toLocaleString('en-US')} defeated` : 'Goal: survive 7 minutes';
   renderNight();
   const box = $('chars'); box.innerHTML = '';
   for (const id in CHARS) {
@@ -1557,7 +1568,7 @@ function renderMenu() {
 function renderNight() {
   const n = Math.max(1, Math.min(save.night || 1, save.nightMax || 1)), k = n - 1;
   $('nname').textContent = 'Night ' + n;
-  $('ndesc').textContent = n === 1 ? 'The first night. Survive 10 minutes.' : `Monsters +${45 * k}% health · ${+(1 + .35 * k).toFixed(2)}× embers`;
+  $('ndesc').textContent = n === 1 ? 'The first night. Survive 7 minutes.' : `Monsters +${45 * k}% health · ${+(1 + .35 * k).toFixed(2)}× embers`;
   $('nlock').textContent = save.nightMax >= 10 ? 'All 10 nights unlocked' : `Win Night ${save.nightMax} to unlock Night ${save.nightMax + 1}`;
   $('nprev').disabled = n <= 1; $('nnext').disabled = n >= save.nightMax;
 }
@@ -1693,7 +1704,7 @@ function frame(now) {
   if (CG.sdk) { loadSave(); renderMenu(); }
   CG.loaded();
 })();
-window.__ev = { get G() { return G; }, update, newRun, choose, endRun, save: () => save };
+window.__ev = { get G() { return G; }, update, newRun, choose, endRun, openLevelUp, save: () => save };
 </script>
 
 </body>
