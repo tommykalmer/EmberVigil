@@ -434,7 +434,10 @@ const CG = {
           });
         } catch (e) { resolve(false); }
       } else if (type === 'rewarded') {
-        mockAd().then(() => resolve(true));
+        // Off CrazyGames there is no ad network: the test overlay only shows on localhost or with ?adtest=1,
+        // everywhere else (e.g. Skerry Arcade) the reward is simply granted.
+        if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname) || /[?&]adtest=1/.test(location.search)) mockAd().then(() => resolve(true));
+        else resolve(true);
       } else resolve(true);
     });
   }
